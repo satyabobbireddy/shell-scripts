@@ -23,6 +23,13 @@ C="\e[36m"
 MB="\e[1;35m"
 APPUSER="student"
 
+DBUSER=student
+DBPASS=student1
+DBHOST=RDSHOST 
+DBNAME=studentapp
+
+DBCON="<Resource name='jdbc/TestDB' auth='Container' type='javax.sql.DataSource' maxTotal='100' maxIdle='30' maxWaitMillis='10000'  username='${DBUSER}' password='${DBPASS}' driverClassName='com.mysql.jdbc.Driver' url='jdbc:mysql://${DBHOST}:3306/${DBNAME}'/>"
+
 ### Functions
 
 ## This function is to proint an error message
@@ -92,10 +99,37 @@ id $APPUSER &>>$LOG
 if [ $? -eq 0 ]; then   
   Status_Check "0" "Add Application User"
 else 
-  useradd  &>>$LOG 
+  useradd $APPUSER &>>$LOG 
   Status_Check "$?" "Add Application User"
 fi 
 
+TOMCAT_VERSION=$(curl -s "https://archive.apache.org/dist/tomcat/tomcat-8/?C=M;O=D" | grep DIR -w | head -1 |xargs -n1 | awk -F '/' '/^href/ {print $1}' |awk -F '=v' '{print $2}')
+TOMCAT_HOME=/home/$APPUSER/apache-tomcat-${TOMCAT_VERSION}
 
+cd /home/$APPUSER
+wget -qO- https://archive.apache.org/dist/tomcat/tomcat-8/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz | tar -xz 
+Status_Check "$?" "Download Application Server"
 
+cd $TOMCAT_HOME 
+curl -s -o webapps/student.war https://s3-us-west-2.amazonaws.com/studentapi-cit/student.war &>>$LOG 
+Status_Check "$?" "Download Student Application"
+
+curl -s -o lib/mysql-connector.jar https://s3-us-west-2.amazonaws.com/studentapi-cit/mysql-connector.jar &>>$LOG 
+Status_Check "$?" "Download Tomcat JDBC Driver"
+
+chown $APPUSER:$APPUSER $TOMCAT_HOME -R 
+
+sed -i -e "$ i $DBCON" $TOMCAT_HOME/conf/context.xml &>>$LOG 
+Status_Check "$?" "Configuring DB Connection"
+
+curl -s https://s3-us-west-2.amazonaws.com/studentapi-cit/tomcat-init -o /etc/init.d/tomcat &>>$LOG 
+Status_Check "$?" "Configure Tomcat Startup Script"
+
+chmod +x /etc/init.d/tomcat 
+systemctl daemon-reload 
+
+systemctl restart tomcat 
+Status_Check "$?" "Starting Tomcat Service"
+
+echo 
 
